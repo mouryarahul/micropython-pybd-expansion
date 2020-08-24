@@ -30,14 +30,18 @@
 #
 """MicroPython Driver for LSM3030AGR onboard the PYBD Expansion Board."""
 
-class LSM3030AGR:
-    """LSM3030AGR Device."""
+
+class LSM303AGR:
+    """LSM303AGR Device."""
 
     # Device I2C Addreses
     # Accelerometer default 7-bit address: 0011001b 0x19
     # Magnetometer default 7-bit address:  0011110b 0x1E
+    ACCEL_ADDR = 0b0011001
+    MAG_ADDR = 0b0011110
 
     # Registers and addresses from https://www.st.com/resource/en/datasheet/lsm303agr.pdf
+
     # Reserved 0x00-0x06
     STATUS_REG_AUX_A            = 0x07
     # Reserved 0x08-0x0B
@@ -105,13 +109,57 @@ class LSM3030AGR:
     OUTZ_H_REG_M                = 0x6D
     # Reserved 0x6E-0x6F
 
-
-    def __init__(self):
+    def __init__(self, i2c = None):
         self._i2c_address = None
+        self._i2c = i2c
 
     def __call__(self):
         return self
 
+    # Reading and Writing to Registers. I2C See page 38 of datasheet.
+    def read_byte_from_register(self, i2c_address: int, register_address: int) -> bytes:
+        """Read a byte from a starting register.
+        Returns a bytes object."""
 
+        return self._i2c.readfrom_mem(i2c_address, register_address, 1)
 
+    def read_bytes_from_register(self, i2c_address: int, register_address: int, num_bytes: int) -> bytes:
+        """Read a num_bytes bytes from a starting register.
+        Returns a bytes object."""
+        # 8-bit register_address needs the MSB set to 1 if more than one byte is to be read.
+        the_reg_address_with_flags = register_address
+        if num_bytes > 1:
+            the_reg_address_with_flags = the_reg_address_with_flags | 0x80
 
+        return self._i2c.readfrom_mem(i2c_address, the_reg_address_with_flags, num_bytes)
+
+    def write_byte_to_register(self, i2c_address: int, register_address: int, the_bytes: bytes):
+        """Write the_bytes[0] to a starting register.
+        Returns None."""
+
+        self._i2c.writeto_mem(i2c_address, register_address, [the_bytes[0]])
+
+    def write_bytes_to_register(self, i2c_address: int, register_address: int, the_bytes: bytes):
+        """Write the_bytes to a starting register.
+        Returns None."""
+        # 8-bit register_address needs the MSB set to 1 if more than one byte is to be read.
+        the_reg_address_with_flags = register_address
+        if len(the_bytes) > 1:
+            the_reg_address_with_flags = the_reg_address_with_flags | 0x80
+
+        if the_bytes:
+            self._i2c.writeto_mem(i2c_address, the_reg_address_with_flags, the_bytes)
+
+        return None
+
+    # Temperature Sensor. See page 34 of datasheet.
+    # def enable_temperature_sensor(self):
+    # def disable_temperature_sensor(self):
+    # def read_temperature_sensor(self):
+
+    def ben_debug(self):
+        the_bytes = self.read_byte_from_register(self.ACCEL_ADDR, self.WHO_AM_I_A)
+        print("WHO_AM_I_A=" + str(the_bytes[0]))
+
+        the_bytes = self.read_byte_from_register(self.MAG_ADDR, self.WHO_AM_I_M)
+        print("WHO_AM_I_M=" + str(the_bytes[0]))
