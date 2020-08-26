@@ -108,16 +108,22 @@ _EXPVAL_WHO_AM_I_A              = 51
 _EXPVAL_WHO_AM_I_M              = 64
 
 # See Table 35, page 47 of datasheet
-ACCEL_POWERMODE_OFF             = 0b0000
-ACCEL_POWERMODE_HR_LP_1HZ       = 0b0001
-ACCEL_POWERMODE_HR_LP_10HZ      = 0b0010
-ACCEL_POWERMODE_HR_LP_25HZ      = 0b0011
-ACCEL_POWERMODE_HR_LP_50HZ      = 0b0100
-ACCEL_POWERMODE_HR_LP_100HZ     = 0b0101
-ACCEL_POWERMODE_HR_LP_200HZ     = 0b0110
-ACCEL_POWERMODE_HR_LP_400HZ     = 0b0111
-ACCEL_POWERMODE_LP_1620HZ       = 0b1000
-ACCEL_POWERMODE_HR_1344HZ       = 0b1001
+# Data Rates
+ACCEL_ODR_POWERDOWN             = 0b0000
+ACCEL_ODR_1HZ                   = 0b0001
+ACCEL_ODR_10HZ                  = 0b0010
+ACCEL_ODR_25HZ                  = 0b0011
+ACCEL_ODR_50HZ                  = 0b0100
+ACCEL_ODR_100HZ                 = 0b0101
+ACCEL_ODR_200HZ                 = 0b0110
+ACCEL_ODR_400HZ                 = 0b0111
+ACCEL_ODR_1620HZ                = 0b1000
+ACCEL_ODR_1344HZ                = 0b1001
+
+ACCEL_FS_2G                     = 0b00
+ACCEL_FS_4G                     = 0b01
+ACCEL_FS_8G                     = 0b10
+ACCEL_FS_16G                    = 0b11
 
 
 class LSM303AGR:
@@ -157,17 +163,115 @@ class LSM303AGR:
         return True
 
     # Temperature Sensor. See page 34 of datasheet.
-    # def enable_temperature_sensor(self):
-    # def disable_temperature_sensor(self):
-    # def read_temperature_sensor(self):
 
-    # Accelerometer Power Modes
-    def set_accel_power_mode(self, accel_powermode):
-        # Read current register value to get other bits.
+    def set_temp_cfg_reg(self, en=0):
+        """Set Temperature TEMP_CFG_REG values."""
+        reg_val = ((en & 0x01) << 6) | ((en & 0x01) << 7)
+        self._write_bytes_to_register(self._accel_i2c_address, _REG_TEMP_CFG_REG_A, bytes([reg_val]))
+        return None
+
+    def get_temp_cfg_reg(self):
+        """Get Temperature TEMP_CFG_REG values."""
+        the_bytes = self._read_bytes_from_register(self._accel_i2c_address, _REG_TEMP_CFG_REG_A)
+        reg_val = the_bytes[0]
+        en = (reg_val >> 7) & 0x01
+        return reg_val, en
+
+    def get_temp_status_reg_aux(self):
+        """Get Temperature STATUS_REG_AUX values."""
+        the_bytes = self._read_bytes_from_register(self._accel_i2c_address, _REG_STATUS_REG_AUX_A)
+        reg_val = the_bytes[0]
+        tor = (reg_val >> 6) & 0x01
+        tda = (reg_val >> 2) & 0x01
+        return reg_val, tda, tor
+
+    def get_temp_output_int(self):
+        """Get Temperature output from the OUT_TEMP_L_A to OUT_TEMP_H_A registers.
+        Returns value as int direct from the upper register only."""
+        # Upper byte is signed int8 offset from 25degreesC. In high resolution mode, the lower byte is decimal.
+        the_bytes = self._read_bytes_from_register(self._accel_i2c_address, _REG_OUT_TEMP_L_A, 2)
+        temp_val = self._bytes_to_int8(the_bytes[1]) + 25
+        return temp_val
+
+    def get_temp_output_float(self):
+        """Get Temperature output from the OUT_TEMP_L_A to OUT_TEMP_H_A registers.
+        Returns value as float using full precision from both registers.
+        Note that Low Power/Normal/High Precision modes affect the bit width of the underlying temperature data."""
+        # Upper byte is signed int8 offset from 25degreesC. In high resolution mode, the lower byte is decimal.
+        the_bytes = self._read_bytes_from_register(self._accel_i2c_address, _REG_OUT_TEMP_L_A, 2)
+        temp_val = self._bytes_to_int16(the_bytes[0], the_bytes[1]) + (25 << 8)
+        temp_val_float = float(temp_val) / 256.0
+        return temp_val_float
+
+    # Accelerometer
+
+    def set_accel_ctrl_reg1(self, xen=1, zen=1, yen=1, lpen=0, accel_odr=ACCEL_ODR_POWERDOWN):
+        """Set Accelerometer CTRL_REG1 values."""
+        reg_val = ((accel_odr & 0x0F) << 4) | ((lpen & 0x01) << 3) | ((zen & 0x01) << 2) | ((yen & 0x01) << 1) | (xen & 0x01)
+        self._write_bytes_to_register(self._accel_i2c_address, _REG_CTRL_REG1_A, bytes([reg_val]))
+        return None
+
+    def get_accel_ctrl_reg1(self):
+        """Get the Accelerometer CTRL_REG1 values."""
         the_bytes = self._read_bytes_from_register(self._accel_i2c_address, _REG_CTRL_REG1_A)
-        reg_val = (the_bytes[0] & 0x0F) | ((accel_powermode & 0x0F) << 4)
+        reg_val = the_bytes[0]
+        xen = reg_val & 0x01
+        yen = (reg_val >> 1) & 0x01
+        zen = (reg_val >> 2) & 0x01
+        lpen = (reg_val >> 3) & 0x01
+        odr = (reg_val >> 4) & 0x0F
+        return reg_val, xen, yen, zen, lpen, odr
 
-        self._write_bytes_to_register(self._accel_i2c_address, _REG_CTRL_REG1_A, bytes([reg_val]) )
+
+    def set_accel_ctrl_reg4(self, hr=0, accel_fs=ACCEL_FS_2G, bdu=0):
+        """Set Accelerometer CTRL_REG4 values."""
+        #reg_val = ((accel_odr & 0x0F) << 4) | ((lpen & 0x01) << 3) | ((zen & 0x01) << 2) | ((yen & 0x01) << 1) | (xen & 0x01)
+        reg_val = ((bdu & 0x01) << 7) | ((accel_fs & 0x03) << 4) | ((hr & 0x01) << 3)
+        self._write_bytes_to_register(self._accel_i2c_address, _REG_CTRL_REG4_A, bytes([reg_val]))
+
+    def get_accel_ctrl_reg4(self):
+        """Get the Accelerometer CTRL_REG4 values."""
+        the_bytes = self._read_bytes_from_register(self._accel_i2c_address, _REG_CTRL_REG4_A)
+        reg_val = the_bytes[0]
+        hr = (reg_val >> 3) & 0x01
+        fs = (reg_val >> 4) & 0x03
+        bdu = (reg_val >> 7) & 0x01
+        return reg_val, hr, fs, bdu
+
+
+    def get_accel_status_reg(self):
+        """Get the Accelerometer STATUS_REG values."""
+        the_bytes = self._read_bytes_from_register(self._accel_i2c_address, _REG_STATUS_REG_A)
+        reg_val = the_bytes[0]
+        xda = reg_val & 0x01
+        yda = (reg_val >> 1) & 0x01
+        zda = (reg_val >> 2) & 0x01
+        zyxda = (reg_val >> 3) & 0x01
+        xor = (reg_val >> 4) & 0x01
+        yor = (reg_val >> 5) & 0x01
+        zor = (reg_val >> 6) & 0x01
+        zyxor = (reg_val >> 7) & 0x01
+        return reg_val, xda, yda, zda, zyxda, xor, yor, zor, zyxor
+
+
+    def get_accel_outputs(self):
+        """Get Accelerometer outputs for X, Y and Z axis from the OUT_X_L_A to OUT_Z_H_A registers.
+        Returns x, y, z as int16 direct from the registers."""
+        the_bytes = self._read_bytes_from_register(self._accel_i2c_address, _REG_OUT_X_L_A, 6)
+        x_val = self._bytes_to_int16(the_bytes[0], the_bytes[1])
+        y_val = self._bytes_to_int16(the_bytes[2], the_bytes[3])
+        z_val = self._bytes_to_int16(the_bytes[4], the_bytes[5])
+
+        return x_val, y_val, z_val
+
+
+
+    # Magnetometer
+    # ...
+
+
+
+
 
 
     # Reading and Writing to Registers. I2C See page 38 of datasheet.
@@ -197,6 +301,39 @@ class LSM303AGR:
 
         return None
 
+    @staticmethod
+    def _bytes_to_uint32(byte0, byte1, byte2, byte3) -> int:
+        """Gets uint32 from the bytes. Where byte0 is LSB."""
+        combined = byte0 | (byte1 << 8) | (byte2 << 16) | (byte3 << 24)
+
+        return int(combined)
+
+    @staticmethod
+    def _bytes_to_uint16(byte0, byte1) -> int:
+        """Gets uint16 from the bytes. Where byte0 is LSB."""
+        combined = byte0 | (byte1 << 8)
+
+        return int(combined)
+
+    @staticmethod
+    def _bytes_to_int16(byte0, byte1) -> int:
+        """Gets int16 from the bytes. Where byte0 is LSB."""
+        combined = byte0 | (byte1 << 8)
+        val = int(combined)
+        if val > 32767:
+            val = val - 65536
+
+        return val
+
+    @staticmethod
+    def _bytes_to_int8(byte0) -> int:
+        """Gets int8 from the bytes. Where byte0 is LSB."""
+        combined = byte0
+        val = int(combined)
+        if val > 127:
+            val = val - 256
+
+        return val
 
 
     def ben_debug(self):
@@ -210,16 +347,43 @@ class LSM303AGR:
         print("CTRL_REG1_A=" + str(the_bytes[0]))
 
         import pyb
-        self.set_accel_power_mode(ACCEL_POWERMODE_OFF)
 
-        the_bytes = self._read_bytes_from_register(self._accel_i2c_address, _REG_CTRL_REG1_A)
-        print("CTRL_REG1_A=" + str(the_bytes[0]))
+        # Temperature
+        self.set_accel_ctrl_reg4(bdu=1)
+        self.set_temp_cfg_reg(en=1)
+
+
+        # Accelerometer
+        self.set_accel_ctrl_reg1(accel_odr=ACCEL_ODR_1HZ)
+        self.set_accel_ctrl_reg4(accel_fs=ACCEL_FS_2G, hr=0, bdu=1) # bdu=1 needed for temperature
+
+        while True:
+
+            # Check the temperature status register for new data
+            status_reg, tda, tor = self.get_temp_status_reg_aux()
+            if tda:
+                temperature = self.get_temp_output_float()
+                print("temperature=" + str(temperature))
+
+
+            # Check the status register for new data
+            status_reg, xda, yda, zda, zyxda, xor, yor, zor, zyxor = self.get_accel_status_reg()
+            if zyxda:
+                x_val, y_val, z_val = self.get_accel_outputs()
+                print("x_val=" + str(x_val) + " y_val=" + str(y_val) + " z_val=" + str(z_val))
+
+
+
+
 
 
 def main():
     import pyb
+    pyb.Pin.board.EN_3V3.off()
+    pyb.delay(1000)
+
     pyb.Pin.board.EN_3V3.on()
-    pyb.delay(20)
+    pyb.delay(500)
     pyb.Pin('PULL_SCL', pyb.Pin.OUT, value=1)  # enable 5.6kOhm X9/SCL pull-up
     pyb.Pin('PULL_SDA', pyb.Pin.OUT, value=1)  # enable 5.6kOhm X10/SDA pull-up
     # i2c = machine.I2C(1, freq=400000)  # machine.I2C
