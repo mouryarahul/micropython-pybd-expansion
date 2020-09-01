@@ -56,7 +56,7 @@ class PowerModule:
         vbatt_val = vbatt_adc.read()  # between 0 and 4095.
         # Convert to volts
         # potential divider of 100K and 390K.
-        vbatt_volts = 4.9 * vbatt_val / 4095.0
+        vbatt_volts = 4.9 * (vbatt_val / 4096.0) * 3.3
         return vbatt_volts
 
     def enable_nm3(self):
@@ -132,22 +132,22 @@ def main():
         print("Disable Outputs")
 
         # Disable all Outputs
-        #power_module.disable_nm3()
+        power_module.disable_nm3()
         power_module.disable_3v3_a()
         power_module.disable_3v3_b()
-        #power_module.disable_5v_a()
-        #power_module.disable_5v_b()
+        power_module.disable_5v_a()
+        power_module.disable_5v_b()
 
         pyb.delay(5000)
 
         print("Enable Outputs")
 
         # Enable all Outputs
-        #power_module.enable_nm3()
+        power_module.enable_nm3()
         power_module.enable_3v3_a()
         power_module.enable_3v3_b()
-        #power_module.enable_5v_a()
-        #power_module.enable_5v_b()
+        power_module.enable_5v_a()
+        power_module.enable_5v_b()
 
         pyb.delay(5000)
 
