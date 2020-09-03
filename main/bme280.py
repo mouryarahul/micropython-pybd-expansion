@@ -167,15 +167,22 @@ class BME280:
     def test_id(self):
         """Test the Sensor ID to confirm device is powered and communicable.
         Returns True if all ok. False if not."""
-        the_bytes = self._read_byte_from_register(self._i2c_address, _REG_ID)
+        the_bytes = self._read_bytes_from_register(self._i2c_address, _REG_ID, 1)
         if not the_bytes:
             return False
-        id = the_bytes[0]
+        the_id = the_bytes[0]
 
-        if id != _EXPVAL_ID:
+        if the_id != _EXPVAL_ID:
             return False
 
         return True
+
+    def soft_reset_device(self):
+        """Soft reset the device by sending the reset command via I2C."""
+        reg_val = 0xB6
+        self._write_bytes_to_register(self._i2c_address, _REG_RESET, bytes([reg_val]))
+        return None
+
 
     def retrieve_calibration_parameters(self):
         """Retrieve the calibration parameters from the device and store locally for use in compensation."""
@@ -289,18 +296,32 @@ class BME280:
         # _REG_PRESS_MSB - bits 19:12
         # _REG_PRESS_LSB - bits 11:4
         # _REG_PRESS_XLSB - bits 3:0
-        raw_press_int16 = self._convert_uint16_to_int16((the_bytes[0] << 12) | (the_bytes[1] << 4) | (the_bytes[2] >> 4))
+        raw_press_uint32 = (int(the_bytes[0]) << 12) | (int(the_bytes[1]) << 4) | (int(the_bytes[2]) >> 4)
+        # If skipped then output will be 0x800000
+        raw_press_int16 = None
+        if raw_press_uint32 != 0x80000:  # Check validity
+            raw_press_int16 = self._convert_uint16_to_int16(raw_press_uint32 & 0xFFFF)
+
 
         # Table 30
         # _REG_TEMP_MSB - bits 19:12
         # _REG_TEMP_LSB - bits 11:4
         # _REG_TEKP_XLSB - bits 3:0
-        raw_temp_int16 = self._convert_uint16_to_int16((the_bytes[3] << 12) | (the_bytes[4] << 4) | (the_bytes[5] >> 4))
+        raw_temp_uint32 = (int(the_bytes[3]) << 12) | (int(the_bytes[4]) << 4) | (int(the_bytes[5]) >> 4)
+        # If skipped then output will be 0x800000
+        raw_temp_int16 = None
+        if raw_temp_uint32 != 0x80000:  # Check validity
+            raw_temp_int16 = self._convert_uint16_to_int16(raw_temp_uint32 & 0xFFFF)
+
 
         # Table 31
         # _REG_HUM_MSB - bits 15:8
         # _REG_HUM_LSB - bits 7:0
-        raw_hum_int16 = self._convert_uint16_to_int16((the_bytes[6] << 8) | the_bytes[7])
+        raw_hum_uint32 = (int(the_bytes[6]) << 8) | int(the_bytes[7])
+        # If skipped then output will be 0x8000
+        raw_hum_int16 = None
+        if raw_hum_uint32 != 0x8000:  # Check validity
+            raw_hum_int16 = self._convert_uint16_to_int16(raw_hum_uint32 & 0xFFFF)
 
         return raw_press_int16, raw_temp_int16, raw_hum_int16
 
@@ -311,10 +332,20 @@ class BME280:
         if not self._calibration_parameters_retrieved:
             self.retrieve_calibration_parameters()
 
+        temperature = None
+        pressure = None
+        humidity = None
+
+        # Check for validity
         # Temperature first for compensation
-        temperature = self._compensate_temperature_float(raw_temp_int16)
-        pressure = self._compensate_pressure_float(raw_press_int16)
-        humidity = self._compensate_humidity_float(raw_hum_int16)
+        if raw_temp_int16:
+            temperature = self._compensate_temperature_float(raw_temp_int16)
+
+        if raw_press_int16:
+            pressure = self._compensate_pressure_float(raw_press_int16)
+
+        if raw_hum_int16:
+            humidity = self._compensate_humidity_float(raw_hum_int16)
 
         return pressure, temperature, humidity
 
@@ -323,7 +354,17 @@ class BME280:
         var1 = (raw_temp_int16 / 16384.0 - self._dig_T1 / 1024.0) * self._dig_T2
         var2 = (raw_temp_int16 / 131072.0 - self._dig_T1 / 8192.0) * (raw_temp_int16 / 131072.0 - self._dig_T1 / 8192.0) * self._dig_T3
         self._temperature_for_compensation = var1 + var2
-        temperature = self._temperature_for_compensation / 5120.0
+        # Hard code while testing. Temperature looks knackered, but with normal temperature for humidity and pressure
+        # compensation those values now look normal.
+        # self._temperature_for_compensation = 20.0 * 5120.0
+
+        temperature = (var1 + var2) / 5120.0
+
+        if temperature < -40.0:
+            temperature = -40.0
+        elif temperature > 85.0:
+            temperature = 85.0
+
         return temperature
 
     def _compensate_pressure_float(self, raw_press_int16):
@@ -365,8 +406,7 @@ class BME280:
 
         return humidity
 
-
-        # Reading and Writing to Registers. I2C See page 32 of datasheet.
+    # Reading and Writing to Registers. I2C See page 32 of datasheet.
     def _read_bytes_from_register(self, i2c_address: int, register_address: int, num_bytes: int = 1) -> bytes:
         """Read a num_bytes bytes from a starting register.
         Returns a bytes object."""
@@ -414,7 +454,7 @@ class BME280:
 
         # Setup to take measurements
         self.set_ctrl_hum_reg(osrs_h=OSRS_OVERSAMPLE_X_1)
-        self.set_ctrl_meas_reg(mode=MODE_FORCED, osrs_p=OSRS_OVERSAMPLE_X_1, osrs_t=OSRS_OVERSAMPLE_X_1)
+        self.set_ctrl_meas_reg(mode=MODE_NORMAL, osrs_p=OSRS_OVERSAMPLE_X_1, osrs_t=OSRS_OVERSAMPLE_X_1)
         self.set_config_reg(filter=FILTER_COEF_OFF, t_sb=STANDBY_T_1000_MS)
 
         # Get Control Registers
@@ -427,54 +467,71 @@ class BME280:
         reg_val, spi3w_en, filter, t_sb = self.get_config_reg()
         print("config_reg=" + str(reg_val))
 
-        measure_flag = True
-        while measure_flag:
-            reg_val, im_update, measuring = self.get_status_reg()
-            print("status_reg=" + str(reg_val) + " im_update=" + str(im_update) + " measuring=" + str(measuring))
-            if not measuring:
-                measure_flag = False
-
         raw_press_int16, raw_temp_int16, raw_hum_int16 = self.get_raw_sensor_values()
         print("raw_press_int16=" + str(raw_press_int16))
         print("raw_temp_int16=" + str(raw_temp_int16))
         print("raw_hum_int16=" + str(raw_hum_int16))
 
-        self.set_ctrl_meas_reg(mode=MODE_FORCED, osrs_p=OSRS_OVERSAMPLE_X_1, osrs_t=OSRS_OVERSAMPLE_X_1)
-        measure_flag = True
-        while measure_flag:
-            reg_val, im_update, measuring = self.get_status_reg()
-            print("status_reg=" + str(reg_val) + " im_update=" + str(im_update) + " measuring=" + str(measuring))
-            if not measuring:
-                measure_flag = False
+        while (not raw_press_int16) or (not raw_temp_int16) or (not raw_hum_int16):
+            raw_press_int16, raw_temp_int16, raw_hum_int16 = self.get_raw_sensor_values()
 
-        raw_press_int16, raw_temp_int16, raw_hum_int16 = self.get_raw_sensor_values()
         print("raw_press_int16=" + str(raw_press_int16))
         print("raw_temp_int16=" + str(raw_temp_int16))
         print("raw_hum_int16=" + str(raw_hum_int16))
 
-        pressure, temperature, humidity = self.get_sensor_values_float()
-        print("pressure=" + str(pressure/100.0) + " hPa")
-        print("temperature=" + str(temperature) + " degC")
-        print("humidity=" + str(humidity) + " %rH")
-
-
+        if raw_temp_int16:
+            self._compensate_temperature_float(raw_temp_int16)
+            print("_compensate_temperature_float=" + str(self._temperature_for_compensation))
 
 
 def main():
     import pyb
-    pyb.Pin.board.EN_3V3.off()
-    pyb.delay(1000)
+    # pyb.Pin.board.EN_3V3.off()
+    # pyb.delay(2000)
 
     pyb.Pin.board.EN_3V3.on()
-    pyb.delay(500)
     pyb.Pin('PULL_SCL', pyb.Pin.OUT, value=1)  # enable 5.6kOhm X9/SCL pull-up
     pyb.Pin('PULL_SDA', pyb.Pin.OUT, value=1)  # enable 5.6kOhm X10/SDA pull-up
     # i2c = machine.I2C(1, freq=400000)  # machine.I2C
-    i2c = pyb.I2C(1) # pyb.I2C
+    i2c = pyb.I2C(1)  # pyb.I2C
     i2c.init(pyb.I2C.MASTER, baudrate=400000)  # pyb.I2C
 
+    pyb.delay(500)
+
     sensor = BME280(i2c)
+
+    sensor.soft_reset_device()
+
+    pyb.delay(500)
+
+    while not sensor.test_id():
+        continue
+
     sensor.run_example()
+
+    pyb.delay(100)
+
+    pressure = 0.0
+    temperature = 0.0
+    humidity = 0.0
+
+    awaiting_valid_measurements = True
+    while awaiting_valid_measurements:
+
+        measuring_flag = True
+        while measuring_flag:
+            reg_val, im_update, measuring = sensor.get_status_reg()
+            if not measuring:
+                measuring_flag = False
+
+        pressure, temperature, humidity = sensor.get_sensor_values_float()
+
+        if pressure and temperature and humidity:
+            awaiting_valid_measurements = False
+
+    print("pressure=" + str(pressure / 100.0) + " hPa")
+    print("temperature=" + str(temperature) + " degC")
+    print("humidity=" + str(humidity) + " %rH")
 
 
 if __name__ == '__main__':
