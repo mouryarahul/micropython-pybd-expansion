@@ -474,20 +474,20 @@ class BME280:
         reg_val, spi3w_en, filter, t_sb = self.get_config_reg()
         print("config_reg=" + str(reg_val))
 
-        raw_press_int16, raw_temp_int16, raw_hum_int16 = self.get_raw_sensor_values()
-        print("raw_press_int16=" + str(raw_press_int16))
-        print("raw_temp_int16=" + str(raw_temp_int16))
+        raw_press_int32, raw_temp_int32, raw_hum_int16 = self.get_raw_sensor_values()
+        print("raw_press_int32=" + str(raw_press_int32))
+        print("raw_temp_int32=" + str(raw_temp_int32))
         print("raw_hum_int16=" + str(raw_hum_int16))
 
-        while (not raw_press_int16) or (not raw_temp_int16) or (not raw_hum_int16):
-            raw_press_int16, raw_temp_int16, raw_hum_int16 = self.get_raw_sensor_values()
+        while (not raw_press_int32) or (not raw_temp_int32) or (not raw_hum_int16):
+            raw_press_int32, raw_temp_int32, raw_hum_int16 = self.get_raw_sensor_values()
 
-        print("raw_press_int16=" + str(raw_press_int16))
-        print("raw_temp_int16=" + str(raw_temp_int16))
+        print("raw_press_int32=" + str(raw_press_int32))
+        print("raw_temp_int32=" + str(raw_temp_int32))
         print("raw_hum_int16=" + str(raw_hum_int16))
 
-        if raw_temp_int16:
-            self._compensate_temperature_float(raw_temp_int16)
+        if raw_temp_int32:
+            self._compensate_temperature_float(raw_temp_int32)
             print("_compensate_temperature_float=" + str(self._temperature_for_compensation))
 
 
