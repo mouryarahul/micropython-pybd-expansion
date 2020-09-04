@@ -296,38 +296,41 @@ class BME280:
         # _REG_PRESS_MSB - bits 19:12
         # _REG_PRESS_LSB - bits 11:4
         # _REG_PRESS_XLSB - bits 3:0
+        # Resolution 16...20 bit
         raw_press_uint32 = (int(the_bytes[0]) << 12) | (int(the_bytes[1]) << 4) | (int(the_bytes[2]) >> 4)
         # If skipped then output will be 0x800000
-        raw_press_int16 = None
+        raw_press_int32 = None
         if raw_press_uint32 != 0x80000:  # Check validity
-            raw_press_int16 = self._convert_uint16_to_int16(raw_press_uint32 & 0xFFFF)
+            raw_press_int32 = self._convert_uint32_to_int32(raw_press_uint32 & 0x000FFFFF)
 
 
         # Table 30
         # _REG_TEMP_MSB - bits 19:12
         # _REG_TEMP_LSB - bits 11:4
-        # _REG_TEKP_XLSB - bits 3:0
+        # _REG_TEMP_XLSB - bits 3:0
+        # Resolution 16...20 bit
         raw_temp_uint32 = (int(the_bytes[3]) << 12) | (int(the_bytes[4]) << 4) | (int(the_bytes[5]) >> 4)
         # If skipped then output will be 0x800000
-        raw_temp_int16 = None
+        raw_temp_int32 = None
         if raw_temp_uint32 != 0x80000:  # Check validity
-            raw_temp_int16 = self._convert_uint16_to_int16(raw_temp_uint32 & 0xFFFF)
+            raw_temp_int32 = self._convert_uint32_to_int32(raw_temp_uint32 & 0x000FFFFF)
 
 
         # Table 31
         # _REG_HUM_MSB - bits 15:8
         # _REG_HUM_LSB - bits 7:0
+
         raw_hum_uint32 = (int(the_bytes[6]) << 8) | int(the_bytes[7])
         # If skipped then output will be 0x8000
         raw_hum_int16 = None
         if raw_hum_uint32 != 0x8000:  # Check validity
             raw_hum_int16 = self._convert_uint16_to_int16(raw_hum_uint32 & 0xFFFF)
 
-        return raw_press_int16, raw_temp_int16, raw_hum_int16
+        return raw_press_int32, raw_temp_int32, raw_hum_int16
 
     def get_sensor_values_float(self):
         """Get the sensor readings as floats for Pressure (Pa), Temperature (DegC), and Humidity (%rH)."""
-        raw_press_int16, raw_temp_int16, raw_hum_int16 = self.get_raw_sensor_values()
+        raw_press_int32, raw_temp_int32, raw_hum_int16 = self.get_raw_sensor_values()
         # Then compensate
         if not self._calibration_parameters_retrieved:
             self.retrieve_calibration_parameters()
@@ -338,25 +341,22 @@ class BME280:
 
         # Check for validity
         # Temperature first for compensation
-        if raw_temp_int16:
-            temperature = self._compensate_temperature_float(raw_temp_int16)
+        if raw_temp_int32:
+            temperature = self._compensate_temperature_float(raw_temp_int32)
 
-        if raw_press_int16:
-            pressure = self._compensate_pressure_float(raw_press_int16)
+        if raw_press_int32:
+            pressure = self._compensate_pressure_float(raw_press_int32)
 
         if raw_hum_int16:
             humidity = self._compensate_humidity_float(raw_hum_int16)
 
         return pressure, temperature, humidity
 
-    def _compensate_temperature_float(self, raw_temp_int16):
+    def _compensate_temperature_float(self, raw_temp_int32):
         """Compensation of Temperature (degC) as float. See Appendix A of datasheet."""
-        var1 = (raw_temp_int16 / 16384.0 - self._dig_T1 / 1024.0) * self._dig_T2
-        var2 = (raw_temp_int16 / 131072.0 - self._dig_T1 / 8192.0) * (raw_temp_int16 / 131072.0 - self._dig_T1 / 8192.0) * self._dig_T3
+        var1 = (raw_temp_int32 / 16384.0 - self._dig_T1 / 1024.0) * self._dig_T2
+        var2 = (raw_temp_int32 / 131072.0 - self._dig_T1 / 8192.0) * (raw_temp_int32 / 131072.0 - self._dig_T1 / 8192.0) * self._dig_T3
         self._temperature_for_compensation = var1 + var2
-        # Hard code while testing. Temperature looks knackered, but with normal temperature for humidity and pressure
-        # compensation those values now look normal.
-        # self._temperature_for_compensation = 20.0 * 5120.0
 
         temperature = (var1 + var2) / 5120.0
 
@@ -367,7 +367,7 @@ class BME280:
 
         return temperature
 
-    def _compensate_pressure_float(self, raw_press_int16):
+    def _compensate_pressure_float(self, raw_press_int32):
         """Compensation of Pressure (Pa) as float. See Appendix A of datasheet."""
         var1 = (self._temperature_for_compensation / 2.0) - 64000.0
         var2 = var1 * var1 * self._dig_P6 / 32768.0
@@ -380,7 +380,7 @@ class BME280:
         pressure = 0.0
 
         if var1 > 0.0:
-            pressure = 1048576.0 - raw_press_int16
+            pressure = 1048576.0 - raw_press_int32
             pressure = (pressure - (var2 / 4096.0)) * 6250.0 / var1
             var1 = self._dig_P9 * pressure * pressure / 2147483648.0
             var2 = pressure * self._dig_P8 / 32768.0
@@ -421,6 +421,13 @@ class BME280:
             # self._i2c.writeto_mem(i2c_address, the_reg_address_with_flags, the_bytes) # machine.I2C
             self._i2c.mem_write(bytes([b]), i2c_address, register_address)  # pyb.I2C
             register_address = register_address + 1  # increment the register address
+
+    def _convert_uint32_to_int32(self, value):
+        """Convert uint32 to int32 by checking sign bit and bit-twiddling."""
+        if value & 0x80000000:
+            value = (-value ^ 0xFFFFFFFF) + 1
+
+        return value
 
     def _convert_uint16_to_int16(self, value):
         """Convert uint16 to int16 by checking sign bit and bit-twiddling."""
@@ -486,8 +493,8 @@ class BME280:
 
 def main():
     import pyb
-    # pyb.Pin.board.EN_3V3.off()
-    # pyb.delay(2000)
+    pyb.Pin.board.EN_3V3.off()
+    pyb.delay(2000)
 
     pyb.Pin.board.EN_3V3.on()
     pyb.Pin('PULL_SCL', pyb.Pin.OUT, value=1)  # enable 5.6kOhm X9/SCL pull-up
