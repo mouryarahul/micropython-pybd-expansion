@@ -110,7 +110,6 @@ class PowerModule:
         pyb.Pin(_3V3BEN_PINSTR, pyb.Pin.IN)
 
 
-
 def main():
     import pyb
     # Cycle Power

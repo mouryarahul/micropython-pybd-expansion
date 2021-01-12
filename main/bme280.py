@@ -160,7 +160,6 @@ class BME280:
 
         self._temperature_for_compensation = 0.0
 
-
     def __call__(self):
         return self
 
@@ -182,7 +181,6 @@ class BME280:
         reg_val = 0xB6
         self._write_bytes_to_register(self._i2c_address, _REG_RESET, bytes([reg_val]))
         return None
-
 
     def retrieve_calibration_parameters(self):
         """Retrieve the calibration parameters from the device and store locally for use in compensation."""
@@ -231,9 +229,6 @@ class BME280:
         print( "dig_H4=" + str(self._dig_H4) + " int16")
         print( "dig_H5=" + str(self._dig_H5) + " int16")
         print("dig_H6=" + str(self._dig_H6) + " int8")
-
-
-
 
     def get_ctrl_hum_reg(self):
         """Get the CTRL_HUM values."""
